@@ -1,43 +1,166 @@
-# Drowsiness Detection System — Fast + Slow VLM Edition
+# SENTINEL DMS — Fast + Slow Driver Monitoring
 
-> **This is a derivative work** forked from
+> **Derivative work** of
 > [tyrerodr/real-time-drowsy-driving-detection](https://github.com/tyrerodr/real-time-drowsy-driving-detection).
-> Upstream repo: YOLOv8 + PyQt5 real-time drowsiness detector.
-> This fork adds a **Slow System** layer powered by a vision-language model
-> (Qwen3.5-Omni via DashScope), plus a multi-dimensional decision fusion
-> module and a product-grade dark-theme UI.
+> See [`NOTICE.md`](NOTICE.md) for full attribution and takedown policy.
 
-## Fast + Slow architecture
+A two-layer **Fast + Slow** driver monitoring system. The **Fast System**
+(MediaPipe + YOLOv8) runs on every frame at ~30 FPS and tracks low-level
+eye/mouth physiology (PERCLOS, EAR, blinks, microsleeps, yawns). The
+**Slow System** is a vision-language model (Qwen3.5-Omni) that runs
+continuously in a background thread and contributes high-level semantic
+reasoning that the Fast System cannot do — distraction, anomaly detection,
+occlusion self-awareness, and scene context — producing a fused
+drowsiness score and a recommended action.
 
-| Layer | Runs at | Technology | What it does |
-|---|---|---|---|
-| **Fast System** | ~30 FPS | MediaPipe + YOLOv8 | Real-time PERCLOS, EAR, blinks, microsleeps, yawn counting |
-| **Slow System** | every 10 s | Qwen3.5-Omni (VLM) | Multi-dimensional reasoning: drowsiness (body posture, facial muscle tone, head tilt), distraction (phone / eating / looking away), anomaly (drug/alcohol signs, emotional distress), occlusion self-awareness, scene context (lighting, passengers), recommended action |
-| **Decision Fusion** | every frame | `decision_fusion.py` | Confidence-weighted fusion of drowsiness only. Other VLM dimensions pass through directly (Fast System has no equivalent signal) |
+The whole thing is wrapped in **SENTINEL DMS**, a product-grade dark-theme
+cockpit UI built with custom `QPainter` widgets (radial risk gauge with
+animated needle, tactical HUD video, pill status chips, sparklines, etc).
 
-## Configuring the Slow System (VLM)
+---
 
-The Slow System calls an OpenAI-compatible endpoint. Credentials are read
-from environment variables — **no keys are hardcoded in the source**:
+## Two-layer architecture
 
-```bash
-export DASHSCOPE_API_KEY=sk-your-key-here
-# optional
-export DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-export DASHSCOPE_MODEL=qwen3.5-omni-plus
+```
+   ┌──────────────────────────────────────────────────────────────┐
+   │                 SENTINEL DMS — Driver Monitoring              │
+   │                                                               │
+   │   ┌──────────────┐       ┌──────────────────────────────┐   │
+   │   │  Fast System │──────▶│     Decision Fusion          │   │
+   │   │  30 FPS      │       │   (drowsiness dimension only)│──▶│
+   │   │  MP + YOLOv8 │       │                              │   │
+   │   │  PERCLOS,EAR │       │   fast_conf ≥ 0.8  → 0.8/0.2│   │
+   │   └──────────────┘       │   fast_conf ≤ 0.5  → 0.2/0.8│   │
+   │          │               │   in between   → linear    │   │
+   │          │               └──────────────────────────────┘   │
+   │          │                                                   │
+   │          ▼ frame submit (10 Hz)                               │
+   │   ┌──────────────┐                                           │
+   │   │  Slow System │  ─▶  VLM  ─▶  {drowsiness, distraction,  │
+   │   │  back-to-back│      Qwen    anomaly, occlusion, context,│
+   │   │  ~0.3 Hz     │      3.5-omni overall_risk, explanation, │
+   │   │              │      flash    recommended_action}         │
+   │   └──────────────┘                                           │
+   │                         distraction / anomaly / occlusion /  │
+   │                         context bypass fusion — shown direct │
+   └──────────────────────────────────────────────────────────────┘
 ```
 
-If `DASHSCOPE_API_KEY` is unset the Slow System automatically falls back to
-**mock mode** so you can exercise the full pipeline offline. The repo ships
-with a complete mock implementation that returns plausible multi-dimensional
-responses.
+| Layer | Rate | Tech | Outputs |
+|---|---|---|---|
+| **Fast System** | ~30 FPS | MediaPipe FaceMesh + YOLOv8 (eye / yawn) | PERCLOS, EAR, blinks, microsleeps, yawn count, fast-drowsiness 0-10 + confidence |
+| **Slow System** | ~0.3-0.5 Hz continuous | Qwen3.5-Omni via DashScope OpenAI-compat | 5-dimension analysis + overall risk + recommended action |
+| **Decision Fusion** | every frame | pure Python | Weighted drowsiness only; other VLM dims pass through |
+
+## What the Slow System buys you
+
+The Fast System is excellent at *"are the eyes closed right now?"* but it
+can't answer *"is the driver looking at their phone? Are they intoxicated?
+Is the mask occluding my judgment?"*. The Slow System VLM is prompted to
+fill this exact schema:
+
+```json
+{
+  "drowsiness":  { "level": 0..10, "confidence": 0..1 },
+  "distraction": { "detected": bool, "type": "phone|eating|talking|looking_away|operating|other|none",
+                   "confidence": 0..1 },
+  "anomaly":     { "detected": bool, "description": "...|null", "severity": "none|low|medium|high" },
+  "occlusion":   { "type": ["mask","sunglasses","hat","none"], "impact_on_reliability": 0..1 },
+  "context":     { "lighting": "good|dim|dark", "passengers_detected": bool },
+  "overall_risk": 0..10,
+  "explanation": "natural-language report",
+  "recommended_action": "none|verbal_warning|alarm|pull_over"
+}
+```
+
+Only the `drowsiness` dimension is fused with the Fast System. The rest —
+distraction, anomaly, occlusion, context, overall_risk, recommended_action
+— are slow-only capabilities and are displayed directly in the UI.
+
+## UI — SENTINEL DMS cockpit
+
+The GUI is a single-window dark-theme HUD built with custom `QPainter`
+widgets (zero external graphics libraries):
+
+- **Brand header bar** — wordmark, LIVE / FAST-FPS / VLM-age status chips (LIVE blinks at 700 ms), live system clock
+- **HUDVideoLabel** — 880 × 660 webcam feed with tactical cyan corner markers and center crosshair
+- **RiskGauge** — radial arc gauge (270° sweep) with tick ring, eased value animation at 60 Hz, 72 px Arial Black central number, and a gradient recommended-action banner underneath
+- **Fast System card** — 4 × 2 metric grid (blinks, microsleeps, yawns, PERCLOS, EAR, yawn-duration, fast-drowsiness, fast-confidence) with a rolling **Sparkline** of recent PERCLOS
+- **Slow System card** — 5-row multi-dimensional analysis with unicode progress bars (`█`-block) for per-dimension confidence / severity / occlusion-impact
+- **VLM analysis report** — full-width bottom strip showing the Qwen natural-language explanation
+- **Status footer** — session timer, current model, FPS, GPU
+
+Threading discipline: the capture / process worker threads only write
+shared state under `_frame_lock`. A main-thread `QTimer` (`_ui_tick`) at
+~30 Hz drives all widget updates — Qt thread-safe.
+
+## Configuration (env vars only — no hardcoded keys)
+
+```bash
+# Required for real Qwen calls. If unset, SlowSystem falls back to mock mode
+# automatically so the full UI pipeline still runs.
+export DASHSCOPE_API_KEY=sk-your-key-here
+
+# Optional — defaults shown
+export DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+export DASHSCOPE_MODEL=qwen3.5-omni-flash   # flash is 3-4× faster than plus
+export SLOW_INTERVAL_SECONDS=0              # 0 = back-to-back (max throughput)
+export SLOW_IMAGE_MAX_SIDE=480              # JPEG long-side clamp
+```
+
+**Choosing a model** — measured DashScope latencies (480 px JPEG q80, 3 back-to-back cycles each):
+
+| Model | First call | Warm | Effective rate |
+|---|---|---|---|
+| `qwen3.5-omni-flash` ← **default** | 4.7 s | **2.4 s** | ~3-4 calls / 10 s |
+| `qwen3-omni-flash` | 4.8 s | 3.5 s | ~2 calls / 10 s |
+| `qwen3.5-omni-plus` | 8.6 s | 10.7 s | ~1 call / 10 s |
+
+Flash gives you maximum reaction speed at slightly lower reasoning depth;
+`plus` gives you more thorough explanations at a quarter of the throughput.
+Switch any time via `DASHSCOPE_MODEL`.
+
+> ⚠️  **Cost & rate limits.** In max-throughput mode (`SLOW_INTERVAL_SECONDS=0`)
+> the system fires ~1200 VLM calls per hour. DashScope bills per token.
+> If you hit a 429 rate limit, the VLM chip in the header turns red
+> (`VLM ERROR`) and the pipeline keeps going on Fast-only. Set
+> `SLOW_INTERVAL_SECONDS=5` (or higher) to throttle.
+
+## Quick start
+
+```bash
+# 1. Clone
+git clone https://github.com/Frank-tech1/drowsy-driving-vlm.git
+cd drowsy-driving-vlm
+
+# 2. Environment (this fork was developed on Python 3.10 + CUDA 12.8)
+conda create -n drowsy-det python=3.10 -y
+conda activate drowsy-det
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+# Linux only: swap opencv-python for headless to avoid PyQt5 plugin clash
+pip uninstall -y opencv-python opencv-contrib-python
+pip install opencv-python-headless opencv-contrib-python-headless
+pip install openai   # for the Slow System
+
+# 3. Run — with real Qwen
+export DASHSCOPE_API_KEY=sk-your-key-here
+python DrowsinessDetector.py
+
+# Run — mock mode (no API key needed, full UI still exercised)
+unset DASHSCOPE_API_KEY
+python DrowsinessDetector.py
+```
 
 ## Files added by this fork
 
-- `slow_system.py` — background VLM worker (thread, non-blocking, mock + real path)
-- `decision_fusion.py` — confidence-weighted drowsiness fusion
-- `DrowsinessDetector.py` — rewritten with multi-dim dark-theme UI
-- `.gitignore` — augmented with Python / secret hygiene rules
+| File | Purpose |
+|---|---|
+| `slow_system.py` | Background VLM worker thread. Mock + real OpenAI-compatible path. Back-to-back loop when `interval_seconds ≤ 0`. Image pre-scale before upload |
+| `decision_fusion.py` | Confidence-weighted fusion of the drowsiness dimension only |
+| `DrowsinessDetector.py` | Completely rewritten: custom Qt widgets (`RiskGauge`, `StatusChip`, `HUDVideoLabel`, `Sparkline`, `SectionCard`), thread-safe `_ui_tick` QTimer, multi-dimensional rendering, MediaPipe EAR + sliding-window PERCLOS, winsound/paplay cross-platform alert |
+| `NOTICE.md` | Derivative-work attribution and takedown policy |
+| `.gitignore` | Extended with Python bytecode + secret hygiene rules |
 
 ---
 
