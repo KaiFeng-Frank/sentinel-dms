@@ -1,4 +1,45 @@
-# Drowsiness Detection System
+# Drowsiness Detection System — Fast + Slow VLM Edition
+
+> **This is a derivative work** forked from
+> [tyrerodr/real-time-drowsy-driving-detection](https://github.com/tyrerodr/real-time-drowsy-driving-detection).
+> Upstream repo: YOLOv8 + PyQt5 real-time drowsiness detector.
+> This fork adds a **Slow System** layer powered by a vision-language model
+> (Qwen3.5-Omni via DashScope), plus a multi-dimensional decision fusion
+> module and a product-grade dark-theme UI.
+
+## Fast + Slow architecture
+
+| Layer | Runs at | Technology | What it does |
+|---|---|---|---|
+| **Fast System** | ~30 FPS | MediaPipe + YOLOv8 | Real-time PERCLOS, EAR, blinks, microsleeps, yawn counting |
+| **Slow System** | every 10 s | Qwen3.5-Omni (VLM) | Multi-dimensional reasoning: drowsiness (body posture, facial muscle tone, head tilt), distraction (phone / eating / looking away), anomaly (drug/alcohol signs, emotional distress), occlusion self-awareness, scene context (lighting, passengers), recommended action |
+| **Decision Fusion** | every frame | `decision_fusion.py` | Confidence-weighted fusion of drowsiness only. Other VLM dimensions pass through directly (Fast System has no equivalent signal) |
+
+## Configuring the Slow System (VLM)
+
+The Slow System calls an OpenAI-compatible endpoint. Credentials are read
+from environment variables — **no keys are hardcoded in the source**:
+
+```bash
+export DASHSCOPE_API_KEY=sk-your-key-here
+# optional
+export DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+export DASHSCOPE_MODEL=qwen3.5-omni-plus
+```
+
+If `DASHSCOPE_API_KEY` is unset the Slow System automatically falls back to
+**mock mode** so you can exercise the full pipeline offline. The repo ships
+with a complete mock implementation that returns plausible multi-dimensional
+responses.
+
+## Files added by this fork
+
+- `slow_system.py` — background VLM worker (thread, non-blocking, mock + real path)
+- `decision_fusion.py` — confidence-weighted drowsiness fusion
+- `DrowsinessDetector.py` — rewritten with multi-dim dark-theme UI
+- `.gitignore` — augmented with Python / secret hygiene rules
+
+---
 
 ![image](https://github.com/user-attachments/assets/81ab2ce9-94ed-479b-bb76-d289c99800fc)
 ![image](https://github.com/user-attachments/assets/0615e219-f623-47ff-9448-946a9c273500)

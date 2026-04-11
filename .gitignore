@@ -8,3 +8,30 @@
 /datasetsHungingFace
 /requirements
 yolov8n.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+env/
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local env
+.env
+.env.*
+*.key
+
+# Runtime artifacts
+*.log
+*.out
