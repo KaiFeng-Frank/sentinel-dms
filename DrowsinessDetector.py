@@ -522,6 +522,196 @@ class SectionCard(QFrame):
         )
 
 
+class SentinelSplash(QWidget):
+    """
+    Tesla-style boot splash: large brand mark, slim progress bar, and a
+    rotating status message. Used before the main window is ready so the
+    app never "pops up" without context.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setFixedSize(680, 440)
+        self._message = "INITIALIZING"
+        self._progress = 0.0
+        self.setStyleSheet(f"background: {C_BG};")
+
+    def showMessage(self, msg, progress=None):
+        self._message = msg.upper()
+        if progress is not None:
+            self._progress = max(0.0, min(1.0, float(progress)))
+        self.repaint()
+        QApplication.processEvents()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+
+        w, h = self.width(), self.height()
+
+        # --- rounded dark canvas with soft border ---
+        outer = QRectF(0.5, 0.5, w - 1, h - 1)
+        path = QPainterPath()
+        path.addRoundedRect(outer, 24, 24)
+        grad = QLinearGradient(0, 0, 0, h)
+        grad.setColorAt(0.0, QColor("#0a0a0c"))
+        grad.setColorAt(1.0, QColor("#000000"))
+        p.fillPath(path, QBrush(grad))
+        p.setPen(QPen(QColor(C_BORDER), 1))
+        p.drawPath(path)
+
+        # --- brand mark ---
+        p.setPen(QColor(C_ACCENT))
+        p.setFont(_product_font(72, QFont.Black))
+        p.drawText(QRectF(0, 80, w, 96), Qt.AlignCenter, "◈")
+
+        # --- wordmark ---
+        p.setPen(QColor(C_TEXT))
+        p.setFont(_product_font(36, QFont.Black, letter_spacing=4))
+        p.drawText(QRectF(0, 192, w, 46), Qt.AlignCenter, BRAND_NAME)
+
+        # --- subtitle ---
+        p.setPen(QColor(C_TEXT_MUTED))
+        p.setFont(_product_font(11, QFont.Black, letter_spacing=3.5))
+        p.drawText(QRectF(0, 244, w, 18), Qt.AlignCenter, BRAND_SUB)
+
+        # --- progress track ---
+        bar_x = 110
+        bar_y = h - 98
+        bar_w = w - 220
+        bar_h = 3
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(C_BORDER)))
+        p.drawRoundedRect(QRectF(bar_x, bar_y, bar_w, bar_h), 1.5, 1.5)
+
+        # --- progress fill ---
+        fill_w = bar_w * self._progress
+        if fill_w > 0:
+            pgrad = QLinearGradient(bar_x, bar_y, bar_x + fill_w, bar_y)
+            pgrad.setColorAt(0.0, QColor(C_ACCENT_2))
+            pgrad.setColorAt(1.0, QColor(C_ACCENT))
+            p.setBrush(QBrush(pgrad))
+            p.drawRoundedRect(QRectF(bar_x, bar_y, fill_w, bar_h), 1.5, 1.5)
+
+        # --- status message ---
+        p.setPen(QColor(C_TEXT_DIM))
+        p.setFont(_product_font(10, QFont.Black, letter_spacing=3))
+        p.drawText(QRectF(0, h - 64, w, 16), Qt.AlignCenter, self._message)
+
+        # --- percent ---
+        p.setPen(QColor(C_TEXT_MUTED))
+        p.setFont(_product_font(9, QFont.Bold, letter_spacing=2))
+        p.drawText(QRectF(0, h - 42, w, 14), Qt.AlignCenter,
+                   f"{int(self._progress * 100):02d}%")
+
+
+class NavRailButton(QWidget):
+    """Vertical icon + label button for the left nav rail."""
+
+    def __init__(self, icon, label, active=False, parent=None):
+        super().__init__(parent)
+        self._icon = icon
+        self._label = label.upper()
+        self._active = active
+        self.setFixedHeight(78)
+        self.setFixedWidth(90)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        w, h = self.width(), self.height()
+
+        # --- active highlight (left accent bar + bg) ---
+        if self._active:
+            bg = QRectF(8, 6, w - 16, h - 12)
+            path = QPainterPath()
+            path.addRoundedRect(bg, 12, 12)
+            p.fillPath(path, QColor(C_CARD_2))
+            # Left accent bar
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(C_ACCENT)))
+            p.drawRoundedRect(QRectF(0, 18, 3, h - 36), 1.5, 1.5)
+
+        # --- icon ---
+        icon_color = C_TEXT if self._active else C_TEXT_MUTED
+        p.setPen(QColor(icon_color))
+        p.setFont(_product_font(22, QFont.Black))
+        p.drawText(QRectF(0, 14, w, 34), Qt.AlignCenter, self._icon)
+
+        # --- label ---
+        label_color = C_TEXT if self._active else C_TEXT_FAINT
+        p.setPen(QColor(label_color))
+        p.setFont(_product_font(8, QFont.Black, letter_spacing=1.5))
+        p.drawText(QRectF(0, 48, w, 14), Qt.AlignCenter, self._label)
+
+
+class NavRail(QWidget):
+    """
+    Tesla-style left vertical navigation rail. Hosts the brand mark at the
+    top and four app sections underneath (only MONITOR is wired — the rest
+    are visual placeholders that make the app feel like part of a complete
+    product rather than a standalone tool).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(96)
+        self.setStyleSheet(
+            f"NavRail {{ background: {C_BG_ALT}; "
+            f"border-right: 1px solid {C_BORDER}; }}"
+        )
+        self.setAutoFillBackground(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 22, 0, 22)
+        layout.setSpacing(2)
+
+        # Brand mark at the top
+        logo = QLabel(
+            f"<span style='color:{C_ACCENT};font-size:30px;font-weight:900;'>◈</span>"
+        )
+        logo.setStyleSheet("background: transparent;")
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setFixedHeight(58)
+        layout.addWidget(logo)
+
+        # thin divider under the logo
+        div = QFrame()
+        div.setFrameShape(QFrame.HLine)
+        div.setFixedHeight(1)
+        div.setStyleSheet(f"background: {C_BORDER}; border: 0;")
+        layout.addSpacing(6)
+        layout.addWidget(div)
+        layout.addSpacing(12)
+
+        for icon, label, active in (
+            ("◉", "MONITOR", True),
+            ("▤", "TRIP", False),
+            ("⚙", "SETTINGS", False),
+            ("ⓘ", "ABOUT", False),
+        ):
+            btn = NavRailButton(icon, label, active=active)
+            layout.addWidget(btn, 0, Qt.AlignHCenter)
+
+        layout.addStretch()
+
+        # Footer badge at bottom of rail
+        badge = QLabel(
+            f"<span style='color:{C_TEXT_FAINT};font-size:8px;"
+            f"font-weight:900;letter-spacing:1.8px;'>{BRAND_VERSION.upper()}</span>"
+        )
+        badge.setStyleSheet("background: transparent;")
+        badge.setAlignment(Qt.AlignCenter)
+        layout.addWidget(badge)
+
+
 class DrowsinessDetector(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -573,7 +763,7 @@ class DrowsinessDetector(QMainWindow):
 
         # ================= SENTINEL DMS product UI =================
         self.setWindowTitle(f"{BRAND_NAME} DMS  ·  {BRAND_SUB}")
-        self.setGeometry(30, 30, 1860, 1080)
+        self.setGeometry(30, 30, 1960, 1080)
         self.setStyleSheet(
             f"QMainWindow {{ background-color: {C_BG}; }}"
             f"QWidget {{ background-color: {C_BG}; color: {C_TEXT}; }}"
@@ -582,36 +772,53 @@ class DrowsinessDetector(QMainWindow):
         self.central_widget = QWidget(self)
         self.setCentralWidget(self.central_widget)
 
-        root_layout = QVBoxLayout(self.central_widget)
-        root_layout.setContentsMargins(26, 18, 26, 14)
+        # ---- outer: [ NavRail | main column ] ----
+        outer_layout = QHBoxLayout(self.central_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self.nav_rail = NavRail()
+        outer_layout.addWidget(self.nav_rail)
+
+        main_col = QWidget()
+        main_col.setStyleSheet(f"background: {C_BG};")
+        outer_layout.addWidget(main_col, 1)
+
+        root_layout = QVBoxLayout(main_col)
+        root_layout.setContentsMargins(26, 16, 26, 14)
         root_layout.setSpacing(14)
 
         # ================================================================
-        #                        TOP BRAND BAR
+        #                  TOP BAR — driver greeting + chips
         # ================================================================
         top_bar = QWidget()
-        top_bar.setFixedHeight(72)
+        top_bar.setFixedHeight(80)
         top_bar.setStyleSheet(f"background: transparent;")
         top_layout = QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(10, 12, 10, 12)
+        top_layout.setContentsMargins(6, 10, 6, 10)
         top_layout.setSpacing(16)
 
-        self.brand_label = QLabel(
-            f"<span style='color:{C_ACCENT};font-size:32px;font-weight:900;'>◈</span>"
-            f"<span style='color:{C_TEXT};font-size:28px;font-weight:900;"
-            f"letter-spacing:2px;'>  {BRAND_NAME}</span>"
-            f"<span style='color:{C_TEXT_MUTED};font-size:13px;"
-            f"font-weight:bold;letter-spacing:2.5px;'>"
-            f"   ·   {BRAND_SUB}</span>"
-        )
-        self.brand_label.setStyleSheet("background: transparent;")
-        top_layout.addWidget(self.brand_label)
+        # Left side: greeting (big) + mode line (small, muted)
+        greet_col = QWidget()
+        greet_col.setStyleSheet("background: transparent;")
+        greet_v = QVBoxLayout(greet_col)
+        greet_v.setContentsMargins(0, 0, 0, 0)
+        greet_v.setSpacing(4)
 
+        self.greeting_label = QLabel()
+        self.greeting_label.setStyleSheet("background: transparent;")
+        greet_v.addWidget(self.greeting_label)
+
+        self.mode_label = QLabel()
+        self.mode_label.setStyleSheet("background: transparent;")
+        greet_v.addWidget(self.mode_label)
+
+        top_layout.addWidget(greet_col)
         top_layout.addStretch()
 
         self.chip_live = StatusChip("LIVE", C_DANGER, blinking=True)
         self.chip_fast = StatusChip("FAST  30 FPS", C_ACCENT)
-        self.chip_slow = StatusChip("VLM STANDBY", C_TEXT_MUTED)
+        self.chip_slow = StatusChip("AI COPILOT STANDBY", C_TEXT_MUTED)
         top_layout.addWidget(self.chip_live)
         top_layout.addWidget(self.chip_fast)
         top_layout.addWidget(self.chip_slow)
@@ -623,7 +830,7 @@ class DrowsinessDetector(QMainWindow):
             f"color: {C_TEXT}; background: transparent;"
         )
         self.clock_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.clock_label.setMinimumWidth(300)
+        self.clock_label.setMinimumWidth(320)
         top_layout.addWidget(self.clock_label)
 
         root_layout.addWidget(top_bar)
@@ -692,7 +899,7 @@ class DrowsinessDetector(QMainWindow):
         gauge_card_layout.setSpacing(8)
 
         gauge_card_layout.addWidget(_make_section_header(
-            "◆  FUSION OUTPUT     FAST + SLOW AGGREGATED"
+            "◆  DRIVER STATUS     REAL-TIME FUSED ASSESSMENT"
         ))
 
         self.risk_gauge = RiskGauge()
@@ -707,7 +914,7 @@ class DrowsinessDetector(QMainWindow):
         fast_card_layout.setSpacing(10)
 
         fast_card_layout.addWidget(_make_section_header(
-            "●  FAST SYSTEM     REAL-TIME DETECTION"
+            "●  VITAL SIGNS     30 FPS FACIAL TRACKING"
         ))
 
         self.fast_label = QLabel()
@@ -731,7 +938,7 @@ class DrowsinessDetector(QMainWindow):
         slow_card_layout.setSpacing(10)
 
         slow_card_layout.addWidget(_make_section_header(
-            "◆  SLOW SYSTEM     VLM MULTI-DIMENSIONAL ANALYSIS"
+            "◆  AI COPILOT     CONTEXTUAL AWARENESS"
         ))
 
         self.slow_label = QLabel()
@@ -758,7 +965,7 @@ class DrowsinessDetector(QMainWindow):
         bottom_header = QLabel(
             f"<span style='color:{C_TEXT_DIM};font-size:12px;"
             f"font-weight:900;letter-spacing:2.5px;'>"
-            f"📄  VLM ANALYSIS REPORT     REAL-TIME NATURAL LANGUAGE</span>"
+            f"📄  AI COPILOT BRIEFING     LIVE NATURAL LANGUAGE</span>"
         )
         bottom_header.setStyleSheet("background: transparent;")
         bottom_layout.addWidget(bottom_header)
@@ -985,9 +1192,13 @@ class DrowsinessDetector(QMainWindow):
             slow_html = (
                 "<table width='100%' height='220' cellpadding='0' cellspacing='0'>"
                 "<tr><td align='center' valign='middle'>"
-                f"<span style='color:{C_TEXT_MUTED};font-size:16px;"
-                f"font-weight:900;letter-spacing:2px;'>"
-                f"⏳     AWAITING FIRST VLM SAMPLE"
+                f"<span style='color:{C_TEXT_DIM};font-size:18px;"
+                f"font-weight:900;letter-spacing:2.5px;'>"
+                f"◆     AI COPILOT CALIBRATING"
+                f"</span><br><br>"
+                f"<span style='color:{C_TEXT_MUTED};font-size:12px;"
+                f"font-weight:bold;letter-spacing:2px;'>"
+                f"Contextual analysis will appear shortly"
                 f"</span>"
                 "</td></tr></table>"
             )
@@ -1134,32 +1345,78 @@ class DrowsinessDetector(QMainWindow):
             fps = 0.0
         self.chip_fast.set_text(f"FAST  {fps:.0f} FPS")
 
-        # VLM chip
+        # AI Copilot chip
         if slow is None:
-            self.chip_slow.set_text("VLM STANDBY")
+            self.chip_slow.set_text("COPILOT STANDBY")
             self.chip_slow.set_color(C_TEXT_MUTED)
         else:
             age = max(0.0, time.time() - float(slow.get("timestamp", time.time())))
             source = slow.get("source", "VLM")
             if source == "error":
-                self.chip_slow.set_text("VLM ERROR")
+                self.chip_slow.set_text("COPILOT ERROR")
                 self.chip_slow.set_color(C_DANGER)
             elif age > 30:
-                self.chip_slow.set_text("VLM STALE")
+                self.chip_slow.set_text("COPILOT STALE")
                 self.chip_slow.set_color(C_WARN)
             else:
-                self.chip_slow.set_text(f"VLM  {age:.0f}S AGO")
+                self.chip_slow.set_text(f"COPILOT  {age:.0f}S AGO")
                 self.chip_slow.set_color(C_ACCENT)
 
-        # Clock
+        # ---- Clock + date ----
         now = datetime.now()
+        weekdays = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+        wk = weekdays[now.weekday()]
         self.clock_label.setText(
             f"<span style='color:{C_TEXT_MUTED};font-size:11px;"
-            f"font-weight:900;letter-spacing:2.5px;'>SYSTEM TIME</span>"
+            f"font-weight:900;letter-spacing:2.5px;'>"
+            f"{wk}  {now.strftime('%b %d').upper()}</span>"
             f"&nbsp;&nbsp;&nbsp;&nbsp;"
-            f"<span style='color:{C_TEXT};font-size:20px;"
+            f"<span style='color:{C_TEXT};font-size:22px;"
             f"font-weight:900;letter-spacing:1px;'>"
             f"{now.strftime('%H:%M:%S')}</span>"
+        )
+
+        # ---- Driver greeting + monitoring mode ----
+        hr = now.hour
+        if 5 <= hr < 12:
+            greet = "GOOD MORNING, DRIVER"
+        elif 12 <= hr < 17:
+            greet = "GOOD AFTERNOON, DRIVER"
+        elif 17 <= hr < 22:
+            greet = "GOOD EVENING, DRIVER"
+        else:
+            greet = "DRIVE SAFELY, DRIVER"
+
+        self.greeting_label.setText(
+            f"<span style='color:{C_TEXT};font-size:22px;"
+            f"font-weight:900;letter-spacing:1.5px;'>{greet}</span>"
+        )
+
+        # Mode line — colored by current fused risk
+        if fused is None:
+            mode_text = "SYSTEM INITIALIZING"
+            mode_color = C_TEXT_MUTED
+        else:
+            risk_zh = fused.risk_label
+            if risk_zh == "正常":
+                mode_text = "● MONITORING ACTIVE  ·  ALL SYSTEMS NOMINAL"
+                mode_color = C_OK
+            elif risk_zh == "轻度疲劳":
+                mode_text = "● MONITORING ACTIVE  ·  MILD FATIGUE DETECTED"
+                mode_color = C_WARN
+            elif risk_zh == "中度疲劳":
+                mode_text = "● MONITORING ACTIVE  ·  MODERATE FATIGUE — ATTENTION"
+                mode_color = C_ORANGE
+            elif risk_zh == "严重疲劳":
+                mode_text = "● MONITORING ACTIVE  ·  SEVERE FATIGUE — ACTION REQUIRED"
+                mode_color = C_DANGER
+            else:
+                mode_text = "● MONITORING ACTIVE"
+                mode_color = C_OK
+
+        self.mode_label.setText(
+            f"<span style='color:{mode_color};font-size:11px;"
+            f"font-weight:900;letter-spacing:2.5px;'>{mode_text}</span>"
         )
 
         # Footer
@@ -1460,6 +1717,34 @@ if __name__ == "__main__":
         f"border: 1px solid {C_BORDER_2}; padding: 6px 10px; }}"
     )
 
+    # ---------- Tesla-style boot sequence ----------
+    splash = SentinelSplash()
+    splash.show()
+    app.processEvents()
+
+    splash.showMessage("POWERING UP SENTINEL DMS", 0.12)
+    time.sleep(0.35)
+
+    splash.showMessage("INITIALIZING VITAL SIGNS MODULE", 0.28)
+    time.sleep(0.35)
+
+    splash.showMessage("LOADING NEURAL MODELS", 0.45)
+    # DrowsinessDetector.__init__ does the real work: YOLO load, webcam
+    # open, MediaPipe init, SlowSystem thread start. All of that happens
+    # behind this splash step.
     window = DrowsinessDetector()
+
+    splash.showMessage("CALIBRATING FACIAL TRACKING", 0.68)
+    time.sleep(0.35)
+
+    splash.showMessage("LINKING AI COPILOT", 0.85)
+    time.sleep(0.35)
+
+    splash.showMessage("MONITORING ACTIVE", 1.0)
+    time.sleep(0.25)
+
     window.show()
+    window.raise_()
+    window.activateWindow()
+    splash.close()
     sys.exit(app.exec_())
