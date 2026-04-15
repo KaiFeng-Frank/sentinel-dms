@@ -28,7 +28,7 @@ from typing import Optional, Tuple
 @dataclass
 class FusionResult:
     drowsiness_level: float        # 0..10
-    risk_label: str                # "正常" / "轻度疲劳" / "中度疲劳" / "严重疲劳"
+    risk_label: str                # "NORMAL" / "MILD FATIGUE" / "MODERATE FATIGUE" / "SEVERE FATIGUE"
     fast_weight: float
     slow_weight: float
     used_slow: bool
@@ -56,12 +56,12 @@ class DecisionFusion:
     @staticmethod
     def _label(level: float) -> str:
         if level < 3:
-            return "正常"
+            return "NORMAL"
         if level < 5:
-            return "轻度疲劳"
+            return "MILD FATIGUE"
         if level < 7:
-            return "中度疲劳"
-        return "严重疲劳"
+            return "MODERATE FATIGUE"
+        return "SEVERE FATIGUE"
 
     @staticmethod
     def _slow_drowsiness(slow_state: Optional[dict]) -> Optional[float]:
@@ -103,7 +103,7 @@ class DecisionFusion:
                 used_slow=False,
                 fast_level=fast_level,
                 slow_level=None,
-                explanation="慢系统暂无最新疲劳判断，仅依据 Fast System 实时检测。",
+                explanation="Slow System has no recent drowsiness sample; relying on Fast System only.",
             )
 
         fw, sw = self._weights(fast_conf)

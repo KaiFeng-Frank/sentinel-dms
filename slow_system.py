@@ -46,42 +46,42 @@ except ImportError:  # pragma: no cover
     _HAS_OPENAI = False
 
 
-DEFAULT_PROMPT = """你是一名专业的驾驶员状态分析专家。请对图片中的驾驶员进行**多维度**分析：
+DEFAULT_PROMPT = """You are a professional driver-state analysis expert. Perform a **multi-dimensional** analysis of the driver in the image.
 
-需要同时分析以下五个维度：
-1. **疲劳状态 (drowsiness)**：不要只看眼睛开闭。综合面部肌肉松弛度、头部倾斜角度、整体姿态（含肩颈是否下垂）、表情张力等线索做整体判断。
-2. **分心检测 (distraction)**：判断驾驶员是否正在看手机、吃东西、与乘客交谈、低头操作中控/物品、回头等。
-3. **异常行为 (anomaly)**：是否有疑似药物或酒精中毒迹象（眼神涣散无焦点、面色异常、肢体不协调）、情绪异常（哭泣、愤怒、惊恐）、身体不适（捂胸口、按头、僵硬）。
-4. **遮挡情况 (occlusion)**：识别口罩 (mask)、墨镜 (sunglasses)、帽子 (hat) 等遮挡物，并明确说明这些遮挡是否削弱了你判断的可信度。
-5. **场景上下文 (context)**：车内光线条件、是否能看到乘客、其他可推断的驾驶环境信息。
+Analyse the following five dimensions in parallel:
+1. **Drowsiness** — do not look only at eye open/close. Combine facial muscle slackness, head tilt angle, overall posture (shoulder/neck slump), and expression tension.
+2. **Distraction** — determine whether the driver is on the phone, eating, talking to passengers, looking down at the console/objects, looking away, etc.
+3. **Anomaly** — signs of possible drug/alcohol intoxication (unfocused gaze, abnormal complexion, uncoordinated movement), emotional distress (crying, anger, panic), or physical discomfort (clutching chest, head in hand, stiffness).
+4. **Occlusion** — identify mask / sunglasses / hat and clearly state whether these occlusions reduce your judgment confidence.
+5. **Scene context** — cabin lighting condition, whether passengers are visible, and any other inferable driving environment info.
 
-**严格按照下面的 JSON 结构返回**（字段名必须完全一致；不要添加 markdown、注释或额外说明文字；缺失字段会导致后处理失败）：
+**Return STRICT JSON** in the schema below. Field names must match exactly. Do NOT add markdown, comments, or any extra text. Missing fields will break downstream parsing.
 
 {
   "drowsiness": {
-    "level": 0-10 之间的整数 (0=完全清醒, 10=极度疲劳),
-    "confidence": 0-1 之间的浮点数
+    "level": integer 0-10 (0 = fully alert, 10 = extremely drowsy),
+    "confidence": float 0-1
   },
   "distraction": {
-    "detected": true 或 false,
+    "detected": true or false,
     "type": "phone" / "eating" / "talking" / "looking_away" / "operating" / "other" / "none",
     "confidence": 0-1
   },
   "anomaly": {
-    "detected": true 或 false,
-    "description": "如果检测到异常，用一句话描述；否则填 null",
+    "detected": true or false,
+    "description": "one-sentence description if detected; otherwise null",
     "severity": "low" / "medium" / "high" / "none"
   },
   "occlusion": {
-    "type": ["mask" / "sunglasses" / "hat" / "none" 的列表，未遮挡则为 ["none"]],
-    "impact_on_reliability": 0-1 之间的浮点数 (0=完全不影响判断, 1=完全无法判断)
+    "type": [list of "mask" / "sunglasses" / "hat" / "none"; use ["none"] if no occlusion],
+    "impact_on_reliability": float 0-1 (0 = no impact, 1 = judgment impossible)
   },
   "context": {
     "lighting": "good" / "dim" / "dark",
-    "passengers_detected": true 或 false
+    "passengers_detected": true or false
   },
-  "overall_risk": 0-10 之间的整数，综合疲劳/分心/异常/遮挡得出的总风险评分,
-  "explanation": "用中文写一段完整的多维度分析报告，覆盖你观察到的所有关键线索",
+  "overall_risk": integer 0-10, blended from drowsiness/distraction/anomaly/occlusion,
+  "explanation": "one full paragraph in ENGLISH covering all key cues you observed",
   "recommended_action": "none" / "verbal_warning" / "alarm" / "pull_over"
 }
 """
@@ -202,7 +202,7 @@ class SlowSystem:
                 result = self._analyze(frame)
             except Exception as exc:  # pragma: no cover - safety net
                 result = dict(EMPTY_RESULT)
-                result["explanation"] = f"VLM 调用失败: {exc}"
+                result["explanation"] = f"VLM call failed: {exc}"
                 result["source"] = "error"
             result["timestamp"] = time.time()
             result["latency_s"] = round(time.time() - cycle_start, 3)
@@ -238,9 +238,9 @@ class SlowSystem:
 
         anomaly_descs = [
             None, None, None,
-            "驾驶员眼神涣散、面色苍白，疑似不适",
-            "驾驶员情绪激动，表情紧绷",
-            "驾驶员肢体僵硬，存在身体不适迹象",
+            "Driver's gaze unfocused and complexion pale — possible unwellness",
+            "Driver appears emotionally agitated, facial tension elevated",
+            "Driver's posture is rigid — possible physical discomfort",
         ]
         a_desc = random.choice(anomaly_descs)
         a_severity = "none" if a_desc is None else random.choice(["low", "medium", "high"])
@@ -267,11 +267,11 @@ class SlowSystem:
             action = "none"
 
         explanation = (
-            f"[MOCK] 综合观察：疲劳度 {level}/10；"
-            f"{'检测到分心：' + d_type if distracted else '未发现明显分心'}；"
-            f"{'异常: ' + a_desc if a_desc else '无异常行为'}；"
-            f"遮挡 {occlusions}；车内光线 {lighting}；"
-            f"{'有乘客' if passengers else '未见乘客'}。"
+            f"[MOCK] Composite observation — drowsiness {level}/10; "
+            f"{'distraction detected: ' + d_type if distracted else 'no distraction detected'}; "
+            f"{'anomaly: ' + a_desc if a_desc else 'no anomaly'}; "
+            f"occlusion {occlusions}; cabin lighting {lighting}; "
+            f"{'passengers present' if passengers else 'no passengers visible'}."
         )
 
         return _normalize({
@@ -334,7 +334,7 @@ class SlowSystem:
             data = json.loads(content)
         except json.JSONDecodeError as exc:
             raise RuntimeError(
-                f"VLM 返回非合法 JSON: {exc}; raw={content[:200]}"
+                f"VLM returned invalid JSON: {exc}; raw={content[:200]}"
             ) from exc
         data = _normalize(data)
         data["source"] = self.config.model_name

@@ -16,7 +16,7 @@ import sys
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QLabel, QMainWindow, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QWidget, QFrame, QSizePolicy,
+    QWidget, QFrame, QSizePolicy, QDialog, QPushButton,
 )
 from PyQt5.QtGui import (
     QImage, QPixmap, QPainter, QPen, QBrush, QColor, QFont, QFontMetrics,
@@ -149,11 +149,11 @@ def _action_color(action: str) -> str:
 
 def _action_label(action: str) -> str:
     return {
-        "none": "无需动作",
-        "verbal_warning": "语音提醒",
-        "alarm": "报警",
-        "pull_over": "立即靠边停车",
-    }.get(str(action).lower(), str(action))
+        "none": "NO ACTION",
+        "verbal_warning": "VERBAL WARNING",
+        "alarm": "AUDIBLE ALARM",
+        "pull_over": "PULL OVER NOW",
+    }.get(str(action).lower(), str(action).upper())
 
 
 def _bool_dot(v: bool, true_color: str = "#C62828", false_color: str = "#2E7D32") -> str:
@@ -725,9 +725,267 @@ class NavRail(QWidget):
         layout.addWidget(badge)
 
 
-class DrowsinessDetector(QMainWindow):
+class SensorToggleCard(QWidget):
+    """
+    Clickable row card for the sensor-select screen.
+    Three states — active / inactive / coming-soon / required (always-on).
+    When active the card is tinted iOS blue with a solid checkmark;
+    coming-soon cards are grey with a "SOON" chip; required cards are
+    always-on (can't be clicked).
+    """
+
+    def __init__(self, icon, name, description,
+                 active=True, required=False, coming_soon=False,
+                 parent=None):
+        super().__init__(parent)
+        self._icon = icon
+        self._name = name
+        self._desc = description
+        self._active = active and not coming_soon
+        self._required = required
+        self._coming_soon = coming_soon
+        self.setFixedHeight(72)
+        self.setMinimumWidth(450)
+        if not (coming_soon or required):
+            self.setCursor(Qt.PointingHandCursor)
+
+    def is_active(self):
+        return self._active
+
+    def mousePressEvent(self, event):
+        if self._required or self._coming_soon:
+            return
+        self._active = not self._active
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        w, h = self.width(), self.height()
+
+        rect = QRectF(0.5, 0.5, w - 1, h - 1)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 14, 14)
+
+        # Background fill
+        if self._coming_soon:
+            p.fillPath(path, QColor("#f2f2f7"))
+            border = QColor(C_BORDER)
+        elif self._active:
+            bg = QColor(C_ACCENT)
+            bg.setAlpha(22)
+            p.fillPath(path, bg)
+            border = QColor(C_ACCENT)
+            border.setAlpha(140)
+        else:
+            p.fillPath(path, QColor("#ffffff"))
+            border = QColor(C_BORDER_2)
+
+        p.setPen(QPen(border, 1.3))
+        p.drawPath(path)
+
+        # Icon on the left
+        if self._coming_soon:
+            icon_color = C_TEXT_FAINT
+        elif self._active:
+            icon_color = C_ACCENT
+        else:
+            icon_color = C_TEXT_MUTED
+        p.setPen(QColor(icon_color))
+        p.setFont(_product_font(20, QFont.Black))
+        p.drawText(QRectF(16, 0, 44, h), Qt.AlignLeft | Qt.AlignVCenter, self._icon)
+
+        # Name
+        name_color = C_TEXT_FAINT if self._coming_soon else C_TEXT
+        p.setPen(QColor(name_color))
+        p.setFont(_product_font(12, QFont.Bold, letter_spacing=0.2))
+        p.drawText(QRectF(66, 8, w - 130, 28),
+                   Qt.AlignLeft | Qt.AlignVCenter, self._name)
+
+        # Description (small grey)
+        desc_color = C_TEXT_FAINT if self._coming_soon else C_TEXT_MUTED
+        p.setPen(QColor(desc_color))
+        p.setFont(_product_font(9, QFont.Normal))
+        p.drawText(QRectF(66, 36, w - 130, 22),
+                   Qt.AlignLeft | Qt.AlignVCenter, self._desc)
+
+        # Right-side indicator
+        box = QRectF(w - 48, (h - 28) / 2, 28, 28)
+        box_path = QPainterPath()
+        box_path.addRoundedRect(box, 8, 8)
+
+        if self._active:
+            p.fillPath(box_path, QColor(C_ACCENT))
+            # checkmark
+            p.setPen(QPen(QColor("#ffffff"), 2.4,
+                          Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            cx = w - 34
+            cy = h / 2
+            p.drawLine(QPointF(cx - 5, cy + 1), QPointF(cx - 1, cy + 5))
+            p.drawLine(QPointF(cx - 1, cy + 5), QPointF(cx + 6, cy - 4))
+        elif self._coming_soon:
+            # "SOON" chip
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor("#e5e5ea")))
+            p.drawRoundedRect(box, 8, 8)
+            p.setPen(QColor(C_TEXT_FAINT))
+            p.setFont(_product_font(7, QFont.Black, letter_spacing=1))
+            p.drawText(box, Qt.AlignCenter, "SOON")
+        else:
+            # empty outline box
+            p.setPen(QPen(QColor(C_BORDER_2), 1.6))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(box_path)
+
+
+class SensorSelectScreen(QDialog):
+    """
+    Tesla/Apple-style onboarding dialog presented between the boot splash
+    and the main HUD. Lets the operator pick which inputs + outputs to
+    activate. On accept the caller reads `.get_config()` and instantiates
+    DrowsinessDetector accordingly.
+    """
+
     def __init__(self):
         super().__init__()
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setModal(True)
+        self.setFixedSize(560, 820)
+        self.setStyleSheet(
+            f"QDialog {{ background: {C_BG_ALT}; border: 1px solid {C_BORDER}; "
+            f"border-radius: 28px; }}"
+        )
+
+        # Soft outer drop shadow (simulated via a child frame with border)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(36, 30, 36, 30)
+        root.setSpacing(10)
+
+        # Brand wordmark
+        brand = QLabel(
+            f"<span style='color:{C_ACCENT};font-size:26px;font-weight:900;'>◈</span>"
+            f"<span style='color:{C_TEXT};font-size:20px;font-weight:900;"
+            f"letter-spacing:4px;'>  {BRAND_NAME}</span>"
+            f"<span style='color:{C_TEXT_MUTED};font-size:10px;"
+            f"font-weight:bold;letter-spacing:2.5px;'>   ·   {BRAND_SUB}</span>"
+        )
+        brand.setStyleSheet("background: transparent;")
+        root.addWidget(brand)
+
+        root.addSpacing(12)
+
+        # Title
+        title = QLabel("Configure Sensors")
+        title.setStyleSheet(
+            f"QLabel {{ background: transparent; color: {C_TEXT}; "
+            f"font-size: 32px; font-weight: 900; letter-spacing: -0.6px; }}"
+        )
+        root.addWidget(title)
+
+        sub = QLabel("Choose the inputs to activate for this session")
+        sub.setStyleSheet(
+            f"QLabel {{ background: transparent; color: {C_TEXT_DIM}; "
+            f"font-size: 14px; }}"
+        )
+        root.addWidget(sub)
+
+        root.addSpacing(18)
+
+        # ----- INPUT SOURCES -----
+        input_header = QLabel(
+            f"<span style='color:{C_TEXT_MUTED};font-size:11px;"
+            f"font-weight:900;letter-spacing:2.5px;'>"
+            f"●   INPUT SOURCES</span>"
+        )
+        input_header.setStyleSheet("background: transparent;")
+        root.addWidget(input_header)
+        root.addSpacing(4)
+
+        self.card_camera = SensorToggleCard(
+            "◉", "Camera Feed",
+            "RGB cabin camera · 30 FPS · required",
+            required=True, active=True,
+        )
+        self.card_vlm = SensorToggleCard(
+            "◆", "AI Copilot (VLM)",
+            "Qwen3.5-Omni · contextual reasoning",
+            active=True,
+        )
+        self.card_mic = SensorToggleCard(
+            "▤", "Microphone",
+            "Snoring / yawning audio detection",
+            coming_soon=True,
+        )
+        self.card_imu = SensorToggleCard(
+            "▣", "IMU Sensor",
+            "Head-pose telemetry stream",
+            coming_soon=True,
+        )
+        self.card_gps = SensorToggleCard(
+            "◈", "GPS Sensor",
+            "Location context for route-aware alerts",
+            coming_soon=True,
+        )
+        for c in (self.card_camera, self.card_vlm,
+                  self.card_mic, self.card_imu, self.card_gps):
+            root.addWidget(c)
+            root.addSpacing(6)
+
+        root.addSpacing(6)
+
+        # ----- OUTPUT -----
+        out_header = QLabel(
+            f"<span style='color:{C_TEXT_MUTED};font-size:11px;"
+            f"font-weight:900;letter-spacing:2.5px;'>"
+            f"◎   OUTPUT CHANNELS</span>"
+        )
+        out_header.setStyleSheet("background: transparent;")
+        root.addWidget(out_header)
+        root.addSpacing(4)
+
+        self.card_audio = SensorToggleCard(
+            "♪", "Audio Alerts",
+            "Warning tones + voice prompts",
+            active=True,
+        )
+        root.addWidget(self.card_audio)
+
+        root.addStretch()
+
+        # ----- CTA BUTTON -----
+        self.cta = QPushButton("START MONITORING")
+        self.cta.setCursor(Qt.PointingHandCursor)
+        self.cta.setFixedHeight(58)
+        self.cta.setStyleSheet(
+            f"QPushButton {{"
+            f"  background: {C_ACCENT}; color: white;"
+            f"  border: none; border-radius: 16px;"
+            f"  font-size: 14px; font-weight: 900; letter-spacing: 3.5px;"
+            f"}}"
+            f"QPushButton:hover {{ background: #0062d8; }}"
+            f"QPushButton:pressed {{ background: #004da1; }}"
+            f"QPushButton:disabled {{ background: {C_BORDER_2}; color: {C_TEXT_MUTED}; }}"
+        )
+        # Callback populated by the caller so we can show a "starting…"
+        # message while DrowsinessDetector heavy-init runs.
+        self.cta.clicked.connect(self.accept)
+        root.addWidget(self.cta)
+
+    def get_config(self):
+        return {
+            "vlm_enabled": self.card_vlm.is_active(),
+            "audio_alerts": self.card_audio.is_active(),
+        }
+
+
+class DrowsinessDetector(QMainWindow):
+    def __init__(self, sensor_config=None):
+        super().__init__()
+
+        self._sensor_config = sensor_config or {
+            "vlm_enabled": True, "audio_alerts": True,
+        }
 
         self.yawn_state = ''
         self.left_eye_state =''
@@ -1056,7 +1314,11 @@ class DrowsinessDetector(QMainWindow):
                 jpeg_quality=80,
             )
         )
-        self._slow_system.start()
+        # Start the VLM worker only if the sensor-select screen said so.
+        # If disabled, poll_result() just returns None forever and the
+        # SENTINEL UI shows "COPILOT OFFLINE" in the header chip.
+        if self._sensor_config.get("vlm_enabled", True):
+            self._slow_system.start()
 
         self.cap = cv2.VideoCapture(0)
         time.sleep(1.000)
@@ -1096,20 +1358,13 @@ class DrowsinessDetector(QMainWindow):
         slow = self._slow_state
         fused = self._fusion_result
 
-        risk_label_map = {
-            "正常": (C_OK, "NORMAL"),
-            "轻度疲劳": (C_WARN, "MILD FATIGUE"),
-            "中度疲劳": "#f97316",  # overwritten below — placeholder
-            "严重疲劳": C_DANGER,
-        }
-
-        def risk_label_pair(zh: str):
+        def risk_label_pair(label: str):
             return {
-                "正常": (C_OK, "NORMAL"),
-                "轻度疲劳": (C_WARN, "MILD FATIGUE"),
-                "中度疲劳": ("#f97316", "MODERATE FATIGUE"),
-                "严重疲劳": (C_DANGER, "SEVERE FATIGUE"),
-            }.get(zh, (C_TEXT_MUTED, "INITIALIZING"))
+                "NORMAL": (C_OK, "NORMAL"),
+                "MILD FATIGUE": (C_WARN, "MILD FATIGUE"),
+                "MODERATE FATIGUE": (C_ORANGE, "MODERATE FATIGUE"),
+                "SEVERE FATIGUE": (C_DANGER, "SEVERE FATIGUE"),
+            }.get(label, (C_TEXT_MUTED, "INITIALIZING"))
 
         # ===== overall risk value (prefer VLM overall_risk, else fused drowsiness) =====
         if slow is not None:
@@ -1119,9 +1374,9 @@ class DrowsinessDetector(QMainWindow):
         else:
             overall_val = 0.0
 
-        risk_zh = fused.risk_label if fused is not None else "初始化中"
-        risk_color, risk_en = risk_label_pair(risk_zh)
-        risk_text = f"{risk_en}  ·  {risk_zh}"
+        risk_label = fused.risk_label if fused is not None else "INITIALIZING"
+        risk_color, risk_en = risk_label_pair(risk_label)
+        risk_text = risk_en
 
         action = _safe(slow, "recommended_action", default="none") or "none"
         action_color = _action_color_hex(action)
@@ -1359,7 +1614,10 @@ class DrowsinessDetector(QMainWindow):
         self.chip_fast.set_text(f"FAST  {fps:.0f} FPS")
 
         # AI Copilot chip
-        if slow is None:
+        if not self._sensor_config.get("vlm_enabled", True):
+            self.chip_slow.set_text("COPILOT OFFLINE")
+            self.chip_slow.set_color(C_TEXT_FAINT)
+        elif slow is None:
             self.chip_slow.set_text("COPILOT STANDBY")
             self.chip_slow.set_color(C_TEXT_MUTED)
         else:
@@ -1410,22 +1668,14 @@ class DrowsinessDetector(QMainWindow):
             mode_text = "SYSTEM INITIALIZING"
             mode_color = C_TEXT_MUTED
         else:
-            risk_zh = fused.risk_label
-            if risk_zh == "正常":
-                mode_text = "● MONITORING ACTIVE  ·  ALL SYSTEMS NOMINAL"
-                mode_color = C_OK
-            elif risk_zh == "轻度疲劳":
-                mode_text = "● MONITORING ACTIVE  ·  MILD FATIGUE DETECTED"
-                mode_color = C_WARN
-            elif risk_zh == "中度疲劳":
-                mode_text = "● MONITORING ACTIVE  ·  MODERATE FATIGUE — ATTENTION"
-                mode_color = C_ORANGE
-            elif risk_zh == "严重疲劳":
-                mode_text = "● MONITORING ACTIVE  ·  SEVERE FATIGUE — ACTION REQUIRED"
-                mode_color = C_DANGER
-            else:
-                mode_text = "● MONITORING ACTIVE"
-                mode_color = C_OK
+            risk = fused.risk_label
+            mode_map = {
+                "NORMAL":           ("● MONITORING ACTIVE  ·  ALL SYSTEMS NOMINAL", C_OK),
+                "MILD FATIGUE":     ("● MONITORING ACTIVE  ·  MILD FATIGUE DETECTED", C_WARN),
+                "MODERATE FATIGUE": ("● MONITORING ACTIVE  ·  MODERATE FATIGUE — ATTENTION", C_ORANGE),
+                "SEVERE FATIGUE":   ("● MONITORING ACTIVE  ·  SEVERE FATIGUE — ACTION REQUIRED", C_DANGER),
+            }
+            mode_text, mode_color = mode_map.get(risk, ("● MONITORING ACTIVE", C_OK))
 
         self.mode_label.setText(
             f"<span style='color:{mode_color};font-size:11px;"
@@ -1730,34 +1980,43 @@ if __name__ == "__main__":
         f"border: 1px solid {C_BORDER_2}; padding: 6px 10px; }}"
     )
 
-    # ---------- Tesla-style boot sequence ----------
+    # ---------- 1 · Tesla-style boot splash ----------
     splash = SentinelSplash()
     splash.show()
     app.processEvents()
 
-    splash.showMessage("POWERING UP SENTINEL DMS", 0.12)
+    splash.showMessage("POWERING UP SENTINEL DMS", 0.15)
     time.sleep(0.35)
-
-    splash.showMessage("INITIALIZING VITAL SIGNS MODULE", 0.28)
+    splash.showMessage("INITIALIZING CORE MODULES", 0.35)
     time.sleep(0.35)
+    splash.showMessage("LOADING NEURAL MODELS", 0.65)
+    time.sleep(0.4)
+    splash.showMessage("SYSTEMS ONLINE", 1.0)
+    time.sleep(0.25)
+    splash.close()
 
-    splash.showMessage("LOADING NEURAL MODELS", 0.45)
-    # DrowsinessDetector.__init__ does the real work: YOLO load, webcam
-    # open, MediaPipe init, SlowSystem thread start. All of that happens
-    # behind this splash step.
-    window = DrowsinessDetector()
+    # ---------- 2 · Sensor-select onboarding ----------
+    picker = SensorSelectScreen()
+    if picker.exec_() != QDialog.Accepted:
+        sys.exit(0)
+    sensor_config = picker.get_config()
 
-    splash.showMessage("CALIBRATING FACIAL TRACKING", 0.68)
-    time.sleep(0.35)
+    # ---------- 3 · Boot main HUD with chosen sensors ----------
+    init_splash = SentinelSplash()
+    init_splash.show()
+    app.processEvents()
+    init_splash.showMessage("CALIBRATING FACIAL TRACKING", 0.4)
+    app.processEvents()
 
-    splash.showMessage("LINKING AI COPILOT", 0.85)
-    time.sleep(0.35)
+    window = DrowsinessDetector(sensor_config=sensor_config)
 
-    splash.showMessage("MONITORING ACTIVE", 1.0)
+    init_splash.showMessage("LINKING AI COPILOT", 0.78)
+    time.sleep(0.3)
+    init_splash.showMessage("MONITORING ACTIVE", 1.0)
     time.sleep(0.25)
 
     window.show()
     window.raise_()
     window.activateWindow()
-    splash.close()
+    init_splash.close()
     sys.exit(app.exec_())
