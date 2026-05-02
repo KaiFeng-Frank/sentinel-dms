@@ -16,7 +16,7 @@ import sys
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QLabel, QMainWindow, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QWidget, QFrame, QSizePolicy, QDialog, QPushButton,
+    QWidget, QFrame, QSizePolicy, QDialog, QPushButton, QComboBox,
 )
 from PyQt5.QtGui import (
     QImage, QPixmap, QPainter, QPen, QBrush, QColor, QFont, QFontMetrics,
@@ -36,27 +36,27 @@ BRAND_NAME = "SENTINEL"
 BRAND_SUB = "DRIVER MONITORING SYSTEM"
 BRAND_VERSION = "v1.0"
 
-# ---- Apple iOS 13+ LIGHT-mode palette — clean / bright cockpit ----
-C_BG          = "#f2f2f7"   # iOS systemGroupedBackground (light)
-C_BG_ALT      = "#ffffff"   # pure white — nav rail + subtle surface lifts
-C_CARD        = "#ffffff"   # pure white cards
-C_CARD_2      = "#f9f9fb"   # barely-perceptible elevation
-C_BORDER      = "#e5e5ea"   # iOS systemGray5 (light)
-C_BORDER_2    = "#d1d1d6"   # iOS systemGray4 (light) — stronger separator
+# ---- Apple/Tesla DARK-mode palette — OLED black cockpit ----
+C_BG          = "#000000"   # true OLED black
+C_BG_ALT      = "#0a0a0c"   # subtle lift under the main bg
+C_CARD        = "#1c1c1e"   # iOS systemGray6 (dark) — card bg
+C_CARD_2      = "#2c2c2e"   # iOS systemGray5 (dark) — elevated card
+C_BORDER      = "#38383a"   # iOS separatorColor (dark)
+C_BORDER_2    = "#48484a"   # iOS systemGray4 — stronger separator
 
-C_TEXT        = "#1c1c1e"   # iOS label color — near-black but not pure
-C_TEXT_DIM    = "#48484a"   # iOS secondary label
-C_TEXT_MUTED  = "#8e8e93"   # iOS systemGray (works in both modes)
-C_TEXT_FAINT  = "#c7c7cc"   # iOS systemGray3 (light) — quaternary label
+C_TEXT        = "#ffffff"   # pure white primary
+C_TEXT_DIM    = "#ebebf5"   # iOS secondary label (dark)
+C_TEXT_MUTED  = "#8e8e93"   # iOS systemGray — tertiary
+C_TEXT_FAINT  = "#636366"   # iOS systemGray2 — quaternary
 
-C_ACCENT      = "#007aff"   # iOS system blue (light mode)
-C_ACCENT_2    = "#5ac8fa"   # iOS system teal
+C_ACCENT      = "#0a84ff"   # iOS system blue (dark)
+C_ACCENT_2    = "#5ac8fa"   # iOS system teal (dark)
 
-C_OK          = "#34c759"   # iOS system green (light)
-C_WARN        = "#ffcc00"   # iOS system yellow (light)
-C_ORANGE      = "#ff9500"   # iOS system orange (light)
-C_DANGER      = "#ff3b30"   # iOS system red (light)
-C_CRITICAL    = "#d70015"   # iOS deep red (for critical severity)
+C_OK          = "#30d158"   # iOS system green (dark)
+C_WARN        = "#ffd60a"   # iOS system yellow (dark)
+C_ORANGE      = "#ff9f0a"   # iOS system orange (dark)
+C_DANGER      = "#ff453a"   # iOS system red (dark)
+C_CRITICAL    = "#ff3b30"   # iOS deep red (for critical severity)
 
 # Preferred font families. SF Pro is Apple's system font — not available on
 # Linux, so Qt falls through to Ubuntu Sans (very clean modern sans, close
@@ -570,8 +570,8 @@ class SentinelSplash(QWidget):
         path = QPainterPath()
         path.addRoundedRect(outer, 24, 24)
         grad = QLinearGradient(0, 0, 0, h)
-        grad.setColorAt(0.0, QColor("#ffffff"))
-        grad.setColorAt(1.0, QColor("#f2f2f7"))
+        grad.setColorAt(0.0, QColor(C_CARD))
+        grad.setColorAt(1.0, QColor(C_BG_ALT))
         p.fillPath(path, QBrush(grad))
         p.setPen(QPen(QColor(C_BORDER_2), 1))
         p.drawPath(path)
@@ -770,16 +770,16 @@ class SensorToggleCard(QWidget):
 
         # Background fill
         if self._coming_soon:
-            p.fillPath(path, QColor("#f2f2f7"))
+            p.fillPath(path, QColor(C_BG_ALT))
             border = QColor(C_BORDER)
         elif self._active:
             bg = QColor(C_ACCENT)
-            bg.setAlpha(22)
+            bg.setAlpha(48)
             p.fillPath(path, bg)
             border = QColor(C_ACCENT)
-            border.setAlpha(140)
+            border.setAlpha(180)
         else:
-            p.fillPath(path, QColor("#ffffff"))
+            p.fillPath(path, QColor(C_CARD))
             border = QColor(C_BORDER_2)
 
         p.setPen(QPen(border, 1.3))
@@ -827,7 +827,7 @@ class SensorToggleCard(QWidget):
         elif self._coming_soon:
             # "SOON" chip
             p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(QColor("#e5e5ea")))
+            p.setBrush(QBrush(QColor(C_BORDER)))
             p.drawRoundedRect(box, 8, 8)
             p.setPen(QColor(C_TEXT_FAINT))
             p.setFont(_product_font(7, QFont.Black, letter_spacing=1))
@@ -851,7 +851,7 @@ class SensorSelectScreen(QDialog):
         super().__init__()
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setModal(True)
-        self.setFixedSize(560, 820)
+        self.setFixedSize(560, 880)
         self.setStyleSheet(
             f"QDialog {{ background: {C_BG_ALT}; border: 1px solid {C_BORDER}; "
             f"border-radius: 28px; }}"
@@ -932,6 +932,52 @@ class SensorSelectScreen(QDialog):
             root.addWidget(c)
             root.addSpacing(6)
 
+        # ----- VLM model picker (inline under the sensor cards) -----
+        model_row = QWidget()
+        model_row.setStyleSheet("background: transparent;")
+        model_row_layout = QHBoxLayout(model_row)
+        model_row_layout.setContentsMargins(8, 0, 8, 0)
+        model_row_layout.setSpacing(12)
+
+        model_label = QLabel(
+            f"<span style='color:{C_TEXT_MUTED};font-size:11px;"
+            f"font-weight:900;letter-spacing:2px;'>VLM MODEL</span>"
+        )
+        model_label.setStyleSheet("background: transparent;")
+        model_row_layout.addWidget(model_label, 0, Qt.AlignVCenter)
+
+        self.model_combo = QComboBox()
+        self.model_combo.setCursor(Qt.PointingHandCursor)
+        self.model_combo.addItems([
+            "qwen3.5-omni-plus",
+            "qwen3-omni-flash",
+            "qwen-vl-max",
+            "qwen-vl-plus",
+            "qwen3-vl-plus",
+            "qwen3-vl-max-latest",
+        ])
+        self.model_combo.setCurrentIndex(0)
+        self.model_combo.setFixedHeight(32)
+        self.model_combo.setStyleSheet(
+            f"QComboBox {{"
+            f"  background: {C_CARD_2}; color: {C_TEXT};"
+            f"  border: 1px solid {C_BORDER_2}; border-radius: 10px;"
+            f"  padding: 0 12px;"
+            f"  font-size: 12px; font-weight: 700;"
+            f"}}"
+            f"QComboBox:hover {{ border-color: {C_ACCENT}; }}"
+            f"QComboBox::drop-down {{ border: none; width: 22px; }}"
+            f"QComboBox QAbstractItemView {{"
+            f"  background: {C_CARD}; color: {C_TEXT};"
+            f"  border: 1px solid {C_BORDER_2}; border-radius: 10px;"
+            f"  selection-background-color: {C_ACCENT};"
+            f"  selection-color: white;"
+            f"  padding: 4px;"
+            f"}}"
+        )
+        model_row_layout.addWidget(self.model_combo, 1, Qt.AlignVCenter)
+
+        root.addWidget(model_row)
         root.addSpacing(6)
 
         # ----- OUTPUT -----
@@ -976,6 +1022,7 @@ class SensorSelectScreen(QDialog):
         return {
             "vlm_enabled": self.card_vlm.is_active(),
             "audio_alerts": self.card_audio.is_active(),
+            "model_name": self.model_combo.currentText().strip(),
         }
 
 
@@ -1306,8 +1353,10 @@ class DrowsinessDetector(QMainWindow):
                     "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 ),
                 api_key=_api_key,
-                model_name=os.environ.get(
-                    "DASHSCOPE_MODEL", "qwen3.5-omni-flash"
+                # Preference: UI dropdown > DASHSCOPE_MODEL env > default.
+                model_name=(
+                    (self._sensor_config.get("model_name") or "").strip()
+                    or os.environ.get("DASHSCOPE_MODEL", "qwen3.5-omni-flash")
                 ),
                 request_timeout=40.0,
                 image_max_side=_image_max,
