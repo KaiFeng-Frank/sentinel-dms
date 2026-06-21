@@ -134,7 +134,7 @@ VLM calls and a polished desktop UI suitable for live demos.
 ## Quick Start
 
 ```bash
-git clone https://github.com/kfeng8021-spec/sentinel-dms.git
+git clone https://github.com/KaiFeng-Frank/sentinel-dms.git
 cd sentinel-dms
 
 conda create -n sentinel-dms python=3.10 -y
