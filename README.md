@@ -17,6 +17,15 @@ distraction, occlusion, abnormal behavior and cabin context.
   <b>VLM reasoning path</b> for long-tail context and explainable alerts.
 </p>
 
+## Forked / Based On
+
+This repository is a derivative work based on
+[`tyrerodr/real-time-drowsy-driving-detection`](https://github.com/tyrerodr/real-time-drowsy-driving-detection).
+The original project provided the early YOLO/MediaPipe drowsiness-detection
+foundation. SentinelDMS adds the dual fast/slow monitoring architecture, VLM
+reasoning path, fusion layer, cockpit UI, model-selection flow, business-plan
+visuals and extended documentation.
+
 ## What Changed
 
 This repository started from a conventional YOLO + MediaPipe drowsiness detector
@@ -205,12 +214,5 @@ require larger datasets, automotive-grade validation, privacy review, regulatory
 assessment and edge-hardware profiling.
 
 ## Attribution
-
-This repository is a derivative work based on
-[`tyrerodr/real-time-drowsy-driving-detection`](https://github.com/tyrerodr/real-time-drowsy-driving-detection).
-The original project provided the early YOLO/MediaPipe drowsiness-detection
-foundation. SentinelDMS adds the VLM slow system, decision fusion layer, product
-cockpit UI, model-selection flow, business-plan visuals and extended
-documentation.
 
 See [`NOTICE.md`](NOTICE.md) for the full attribution and takedown policy.
